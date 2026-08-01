@@ -1,0 +1,22 @@
+[[keymap]]
+# 默认按键映射方案
+button0 = "ctrl+shift+z" # krita: redo
+button1 = "ctrl+z" # krita: undo
+button2 = "p" # krita: color picker
+button3 = "[" # krita: decrease brush size
+button4 = "]" # krita: increase brush size
+button5 = "b" # krita: brush
+button6 = "e" # krita: eraser
+button7 = "x" # krita: switch color
+ring0 = "-" # krita: zoom out
+ring1 = "=" # krita: zoom in
+ringButton = "switchSchema"
+# 笔的两个侧键
+stylusButton0 = "mouseRight" # krita: 弹出调色板
+stylusButton1 = "mouseMiddle" # krita: 按住平移画布
+
+[[keymap]]
+# 候选按键映射方案
+ring0 = "ctrl+[" # krita: rotate counter-clockwise
+ring1 = "ctrl+]" # krita: rotate clockwise
+# 未配置的键默认将使用前一个方案的按键映射
