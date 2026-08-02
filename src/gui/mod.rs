@@ -67,6 +67,9 @@ pub struct App {
     dragging_point: Option<usize>,
     observed: Observed,
     message: Option<Message>,
+    /// eframe为了避免首帧白屏，会在画完第一帧后强制显示窗口，
+    /// 覆盖掉`with_visible(false)`；这里数着帧，等它显示之后再隐藏
+    frames_until_hide: u32,
     exiting: bool,
 }
 
@@ -133,6 +136,7 @@ impl App {
             dragging_point: None,
             observed: Observed::default(),
             message: None,
+            frames_until_hide: 2,
             exiting: false,
         }
     }
@@ -264,6 +268,14 @@ impl App {
 impl eframe::App for App {
     /// 界面隐藏时仍会被调用，托盘事件因此不会积压
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.frames_until_hide > 0 {
+            self.frames_until_hide -= 1;
+            if self.frames_until_hide == 0 {
+                ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+            } else {
+                ctx.request_repaint();
+            }
+        }
         self.handle_tray(ctx);
         if self.shared.take_show_request() {
             self.show_window(ctx);

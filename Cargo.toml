@@ -7,6 +7,8 @@ edition = "2024"
 anyhow = "1.0.104"
 eframe = { git = "https://github.com/dfxyz/egui.git", branch = "fork" }
 egui = { git = "https://github.com/dfxyz/egui.git", branch = "fork" }
+# 只用来把图标的SVG栅格化，不需要文字与位图相关的特性
+resvg = { version = "0.47.0", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.4"
 tray-icon = "0.24.2"

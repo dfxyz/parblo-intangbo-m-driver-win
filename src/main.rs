@@ -60,18 +60,25 @@ fn main() -> Result<()> {
         }
     };
 
-    let (rgba, width, height) = gui::icon_image();
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(WINDOW_TITLE)
-            .with_inner_size([600.0, 600.0])
-            .with_resizable(false)
-            .with_maximize_button(false)
-            .with_icon(egui::IconData {
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title(WINDOW_TITLE)
+        .with_inner_size([600.0, 600.0])
+        .with_resizable(false)
+        .with_maximize_button(false)
+        // 常驻后台，启动时只留托盘图标，需要时再从托盘唤起
+        .with_visible(false);
+    match gui::icon_image() {
+        Ok((rgba, width, height)) => {
+            viewport = viewport.with_icon(egui::IconData {
                 rgba,
                 width,
                 height,
-            }),
+            })
+        }
+        Err(e) => warn!("无法生成窗口图标: {:#}", e),
+    }
+    let options = eframe::NativeOptions {
+        viewport,
         ..Default::default()
     };
 
@@ -91,10 +98,11 @@ fn main() -> Result<()> {
     .map_err(|e| anyhow!("界面异常退出: {}", e))
 }
 
+/// 与可执行文件同目录、同主文件名，例如`parblo.exe`对应`parblo.toml`
 fn default_config_path() -> Result<PathBuf> {
-    let exe = std::env::current_exe().context("无法获取可执行文件路径")?;
-    let dir = exe.parent().context("无法获取可执行文件所在目录")?;
-    Ok(dir.join("config.toml"))
+    let mut path = std::env::current_exe().context("无法获取可执行文件路径")?;
+    path.set_extension("toml");
+    Ok(path)
 }
 
 /// 同时运行多个实例会互相抢夺设备上报的报文
