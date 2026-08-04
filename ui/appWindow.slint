@@ -1,0 +1,62 @@
+import { Palette } from "std-widgets.slint";
+import { AppLogic, Status, Theme } from "common.slint";
+import { TabButton } from "widgets.slint";
+import { KeymapPage } from "keymapPage.slint";
+import { AreaPage } from "areaPage.slint";
+import { PressurePage } from "pressurePage.slint";
+import { MonitorPage } from "monitorPage.slint";
+
+// 重新导出后Rust侧才会生成对应的类型
+export { AppLogic, AreaLogic, KeymapLogic, MonitorLogic, PressureLogic, Status } from "common.slint";
+export { TrayIcon } from "tray.slint";
+
+export component AppWindow inherits Window {
+    default-font-family: "Fira Noto SC";
+    default-font-size: 12px;
+
+    title: "Parblo Intangbo M 驱动程序";
+    width: 700px;
+    height: 700px;
+    // 必须由Slint自己加载：从像素缓冲构造的Image没有缓存键，
+    // winit后端那个「图标没变就不重设」的判断会把它当成没变化，永远不生效
+    icon: @image-url("../assets/icon.svg");
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 10px;
+
+        HorizontalLayout {
+            spacing: 6px;
+
+            for name[index] in ["按键映射", "坐标范围", "压感曲线", "数据与日志"]: TabButton {
+                text: name;
+                selected: AppLogic.page == index;
+                clicked => {
+                    AppLogic.page = index;
+                }
+            }
+
+            Rectangle { }
+
+            Text {
+                text: Status.connected ? "● 已连接" : "● 未连接";
+                color: Status.connected ? Theme.ok : Theme.error;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Palette.border;
+        }
+
+        if AppLogic.page == 0: KeymapPage { }
+
+        if AppLogic.page == 1: AreaPage { }
+
+        if AppLogic.page == 2: PressurePage { }
+
+        if AppLogic.page == 3: MonitorPage { }
+    }
+}

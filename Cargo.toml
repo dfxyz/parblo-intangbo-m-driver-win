@@ -3,15 +3,23 @@ name = "parblo-intangbo-m-driver-win"
 version = "0.1.0"
 edition = "2024"
 
+[profile.release]
+codegen-units = 1
+lto = true
+
+[build-dependencies]
+ico = "0.5.0"
+# 只用来把图标的SVG栅格化，不需要文字与位图相关的特性。
+# 放在构建依赖里，图标只在编译期渲染一次，resvg不进最终的二进制
+resvg = { version = "0.47.0", default-features = false }
+slint-build = "1.17.1"
+winresource = "0.1.31"
+
 [dependencies]
 anyhow = "1.0.104"
-eframe = { git = "https://github.com/dfxyz/egui.git", branch = "fork" }
-egui = { git = "https://github.com/dfxyz/egui.git", branch = "fork" }
-# 只用来把图标的SVG栅格化，不需要文字与位图相关的特性
-resvg = { version = "0.47.0", default-features = false }
+slint = "1.17.1"
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.4"
-tray-icon = "0.24.2"
 
 [dependencies.windows]
 version = "0.62.2"

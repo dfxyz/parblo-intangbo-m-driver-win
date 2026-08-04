@@ -5,17 +5,18 @@ use windows::Win32::Devices::DeviceAndDriverInstallation::{
     SetupDiGetClassDevsW, SetupDiGetDeviceInterfaceDetailW,
 };
 use windows::Win32::Devices::HumanInterfaceDevice::{
-    HIDD_ATTRIBUTES, HIDP_CAPS, HIDP_VALUE_CAPS, HidD_GetAttributes, HidD_GetHidGuid,
-    HidD_GetPreparsedData, HidD_FreePreparsedData, HidP_GetCaps, HidP_GetValueCaps, HidP_Input,
+    HIDD_ATTRIBUTES, HIDP_CAPS, HIDP_VALUE_CAPS, HidD_FreePreparsedData, HidD_GetAttributes,
+    HidD_GetHidGuid, HidD_GetPreparsedData, HidP_GetCaps, HidP_GetValueCaps, HidP_Input,
     PHIDP_PREPARSED_DATA,
 };
-use windows::Win32::Foundation::{CloseHandle, ERROR_IO_PENDING, GetLastError, HANDLE, NTSTATUS};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_IO_PENDING, GetLastError, HANDLE, NTSTATUS, WAIT_OBJECT_0,
+};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_OVERLAPPED, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ,
     FILE_SHARE_WRITE, OPEN_EXISTING, ReadFile, WriteFile,
 };
 use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
-use windows::Win32::Foundation::WAIT_OBJECT_0;
 use windows::Win32::System::Threading::{
     CreateEventW, EVENT_MODIFY_STATE, OpenEventW, ResetEvent, SetEvent, WaitForSingleObject,
 };
@@ -255,12 +256,7 @@ fn read_ranges_from_handle(handle: HANDLE) -> Option<PenRanges> {
     let mut count = caps.NumberInputValueCaps;
     let mut value_caps = vec![HIDP_VALUE_CAPS::default(); count as usize];
     let status = unsafe {
-        HidP_GetValueCaps(
-            HidP_Input,
-            value_caps.as_mut_ptr(),
-            &mut count,
-            preparsed.0,
-        )
+        HidP_GetValueCaps(HidP_Input, value_caps.as_mut_ptr(), &mut count, preparsed.0)
     };
     if status != HIDP_STATUS_SUCCESS {
         return None;
@@ -384,12 +380,12 @@ unsafe impl Send for Event {}
 unsafe impl Sync for Event {}
 impl Event {
     pub fn new() -> Result<Self> {
-        let handle = unsafe { CreateEventW(None, true, false, PCWSTR::null()) }
-            .context("CreateEventW")?;
+        let handle =
+            unsafe { CreateEventW(None, true, false, PCWSTR::null()) }.context("CreateEventW")?;
         Ok(Self(handle))
     }
 
-    /// 创建具名的自动重置事件，供跨进程通知使用
+    /// 具名的自动重置事件，供跨进程通知使用
     pub fn named(name: &str) -> Result<Self> {
         let name = HSTRING::from(name);
         let handle = unsafe { CreateEventW(None, false, false, PCWSTR(name.as_ptr())) }
@@ -397,7 +393,7 @@ impl Event {
         Ok(Self(handle))
     }
 
-    /// 打开已有的具名事件；仅用于向另一个实例发送信号
+    /// 打开已有的具名事件；仅用于向另一个实例发信号
     pub fn open(name: &str) -> Result<Self> {
         let name = HSTRING::from(name);
         let handle = unsafe { OpenEventW(EVENT_MODIFY_STATE, false, PCWSTR(name.as_ptr())) }

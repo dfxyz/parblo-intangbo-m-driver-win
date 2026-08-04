@@ -1,0 +1,138 @@
+import { Button, Palette } from "std-widgets.slint";
+import { PressureLogic, Theme } from "common.slint";
+
+/// 曲线编辑区，铺满可用空间
+component CurveEditor inherits Rectangle {
+    background: Theme.canvas-bg;
+    border-radius: 4px;
+    // 不裁剪，否则首末控制点会被画布边缘切掉一半
+
+    for i in 3: Rectangle {
+        x: (i + 1) / 4 * parent.width;
+        width: 1px;
+        background: Theme.canvas-grid;
+    }
+
+    for i in 3: Rectangle {
+        y: (i + 1) / 4 * parent.height;
+        height: 1px;
+        background: Theme.canvas-grid;
+    }
+
+    // 原样输出的参考线；fit默认是contain，画布非正方时viewbox会等比缩放并居中，
+    // 与控制点对不上，所以这里要拉伸铺满
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 1;
+        viewbox-height: 1;
+        fit: fill;
+        commands: "M 0 1 L 1 0";
+        stroke: Theme.canvas-grid;
+        stroke-width: 1px;
+    }
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 1;
+        viewbox-height: 1;
+        fit: fill;
+        commands: PressureLogic.commands;
+        stroke: Theme.accent;
+        stroke-width: 2px;
+    }
+
+    TouchArea {
+        double-clicked => {
+            PressureLogic.add-point((self.mouse-x / parent.width).clamp(0.0, 1.0), (1.0 - self.mouse-y / parent.height).clamp(0.0, 1.0));
+        }
+    }
+
+    for point[index] in PressureLogic.points: Rectangle {
+        x: point.x * parent.width - self.width / 2;
+        y: (1.0 - point.y) * parent.height - self.height / 2;
+        width: 12px;
+        height: 12px;
+        border-radius: self.width / 2;
+        background: white;
+        border-width: 3px;
+        border-color: Theme.accent;
+
+        TouchArea {
+            mouse-cursor: MouseCursor.grab;
+
+            moved => {
+                PressureLogic.move-point(index, ((parent.x + self.mouse-x) / root.width).clamp(0.0, 1.0), (1.0 - (parent.y + self.mouse-y) / root.height).clamp(0.0, 1.0));
+            }
+
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                    PressureLogic.remove-point(index);
+                }
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                    PressureLogic.commit-points();
+                }
+            }
+        }
+    }
+}
+
+export component PressurePage inherits VerticalLayout {
+    spacing: 10px;
+
+    Text {
+        text: "横轴为绘图板上报的原始压力，纵轴为注入系统的压力。拖动控制点调整曲线，双击空白处添加控制点，右键控制点删除。末点左移即可提前到达满压（如拖到50%处，用一半力就是满压），首点右移则忽略过轻的压力。";
+        color: grey;
+        wrap: word-wrap;
+    }
+
+    Text {
+        text: "当前压力：\{PressureLogic.current}";
+    }
+
+    CurveEditor {
+        vertical-stretch: 1;
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+
+        Button {
+            text: "重置";
+            clicked => {
+                PressureLogic.reset();
+            }
+        }
+
+        Button {
+            text: "柔和起笔";
+            clicked => {
+                PressureLogic.soft();
+            }
+        }
+
+        Button {
+            text: "硬朗起笔";
+            clicked => {
+                PressureLogic.hard();
+            }
+        }
+
+        Rectangle { }
+
+        Button {
+            text: "保存";
+            clicked => {
+                PressureLogic.save();
+            }
+        }
+
+        Button {
+            text: "重新加载配置文件";
+            clicked => {
+                PressureLogic.reload();
+            }
+        }
+    }
+}

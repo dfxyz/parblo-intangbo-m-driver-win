@@ -1,0 +1,157 @@
+// 界面与Rust侧交换的数据结构，以及各页面用到的逻辑接口
+
+export struct KeymapEntry {
+    // 绘图板按键的描述，如「按键0」「转环顺时针」
+    label: string,
+    // 映射值的配置字符串，如「ctrl+z」「switchSchema」
+    value: string,
+}
+
+export struct LogEntry {
+    level: string,
+    text: string,
+}
+
+export struct CurvePoint {
+    x: float,
+    y: float,
+}
+
+/// 归一化到0..1的矩形，用于坐标范围示意图
+export struct NormRect {
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+}
+
+export global Theme {
+    out property <color> accent: #9b6acc;
+    out property <color> area-fill: #4a2d6b;
+    out property <color> area-used-fill: #9b6acc;
+    out property <color> measured-stroke: #4caf50;
+    out property <color> canvas-bg: #1f1f24;
+    out property <color> canvas-grid: #33333c;
+    out property <color> ok: #3da55d;
+    out property <color> warn: #c89630;
+    out property <color> error: #d05050;
+}
+
+export global Status {
+    in property <bool> connected: false;
+}
+
+export global AppLogic {
+    // 0=按键映射 1=坐标范围 2=压感曲线 3=数据与日志；
+    // Rust侧据此决定每帧要刷新哪些数据
+    in-out property <int> page: 0;
+}
+
+export global KeymapLogic {
+    in property <int> schema-count: 3;
+    in-out property <int> schema-index: 0;
+    // 当前方案的全部按键映射，顺序与绘图板控件顺序一致。
+    // 界面直接改这个model，Rust侧只在换方案或重新加载时整体重建
+    in-out property <[KeymapEntry]> entries: [
+        { label: "按键0", value: "ctrl+z" },
+        { label: "按键1", value: "ctrl+shift+z" },
+        { label: "按键2", value: "e" },
+        { label: "按键3", value: "b" },
+        { label: "按键4", value: "none" },
+        { label: "按键5", value: "fallback" },
+        { label: "按键6", value: "switchSchema" },
+        { label: "按键7", value: "ctrl+s" },
+        { label: "转环逆时针", value: "[" },
+        { label: "转环顺时针", value: "]" },
+        { label: "转环中键", value: "mouseMiddle" },
+        { label: "笔下侧键", value: "mouseRight" },
+        { label: "笔上侧键", value: "mouseMiddle" },
+    ];
+
+    callback select-schema(int);
+    callback add-schema();
+    callback remove-schema();
+    // 任何一行改动都即时生效，保存是另一回事
+    callback set-entry(int, string);
+    callback save();
+    callback reload();
+
+    // 录制期间界面把按键原样转给Rust，由那边查表拼成配置值并回填对应行；
+    // 返回true表示这次按键已被采纳，可以结束录制
+    callback start-record(int);
+    callback cancel-record();
+    callback record-key(string, bool, bool, bool, bool) -> bool;
+
+    /// 输入框据此把非法值标红；解析规则在Rust那边，界面不重复实现一份
+    pure callback validate(string) -> bool;
+}
+
+export global AreaLogic {
+    in property <string> declared-x: "X = 0 .. 28800";
+    in property <string> declared-y: "Y = 0 .. 16200";
+    in property <string> configured-x: "X = 0 .. 26147";
+    in property <string> configured-y: "Y = 0 .. 16200";
+    in property <string> measured-x: "X = 312 .. 26147";
+    in property <string> measured-y: "Y = 205 .. 16043";
+    in property <string> current-x: "X = 13024 (45.2%)";
+    in property <string> current-y: "Y = 7715 (47.6%)";
+
+    // 绘图板声明范围的宽高比，决定示意图的形状
+    in property <float> tablet-aspect: 28800 / 16200;
+    in property <NormRect> area: { x1: 0.0, y1: 0.0, x2: 0.908, y2: 1.0 };
+    in property <NormRect> area-used: { x1: 0.0, y1: 0.0, x2: 0.908, y2: 0.908 };
+    in property <NormRect> area-measured: { x1: 0.011, y1: 0.013, x2: 0.908, y2: 0.990 };
+    in property <bool> has-measured: true;
+    in property <float> pen-x: 0.452;
+    in property <float> pen-y: 0.476;
+    in property <bool> pen-in-area: true;
+    // 0=左上 1=右上 2=左下 3=右下
+    in-out property <int> anchor: 0;
+
+    // 这些都是点了就生效，但要按「保存」才写回配置文件
+    callback apply-measured();
+    callback remeasure();
+    callback reset-range();
+    callback select-anchor(int);
+    callback save();
+    callback reload();
+}
+
+export global PressureLogic {
+    in property <string> current: "原始 45.3% → 输出 45.3%";
+    in property <[CurvePoint]> points: [
+        { x: 0.0, y: 0.0 },
+        { x: 1.0, y: 1.0 },
+    ];
+    // 折线的Path命令，坐标已归一化到0..1（y轴向下）
+    in property <string> commands: "M 0 1 L 1 0";
+
+    callback move-point(int, float, float);
+    /// 拖动结束；控制点必须按横坐标有序，但拖动过程中不能重排，
+    /// 否则下标会跟着变，鼠标底下就换成另一个点了
+    callback commit-points();
+    callback add-point(float, float);
+    callback remove-point(int);
+    callback reset();
+    callback soft();
+    callback hard();
+    callback save();
+    callback reload();
+}
+
+export global MonitorLogic {
+    in property <string> pen-state: "在感应区内";
+    in property <string> pen-coord: "X = 13024 / 28800  Y = 7715 / 16200";
+    in property <string> pen-pressure: "3712 / 8191  (45.3%)";
+    in property <string> pen-tilt: "X = -12°  Y = 7°";
+    in property <string> recent-buttons: "按键0、按键3、转环顺时针、按键0、转环中键";
+    in property <[LogEntry]> logs: [
+        { level: "INFO", text: "驱动任务开始运行" },
+        { level: "INFO", text: "设备已连接；笔量程 X=0..28800 Y=0..16200 压力=0..8191" },
+        { level: "DEBUG", text: "握手[0]响应: [fd, 0b, 00, 00, 00, 00]" },
+        { level: "WARN", text: "设备已断开，等待重新连接" },
+        { level: "ERROR", text: "连接设备失败，将持续重试: 找不到事件用途的HID集合" },
+    ];
+
+    callback clear-logs();
+}

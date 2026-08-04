@@ -1,0 +1,54 @@
+import { Palette } from "std-widgets.slint";
+import { Theme } from "common.slint";
+
+/// 一组互斥选项里的一个，选中时填充主题色
+export component ToggleButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    callback clicked();
+
+    width: label.preferred-width + 24px;
+    height: 30px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: root.selected ? Theme.accent : Palette.border;
+    background: root.selected ? Theme.accent
+        : (touch.has-hover ? Palette.alternate-background : Palette.control-background);
+
+    label := Text {
+        text: root.text;
+        color: root.selected ? white : Palette.foreground;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component TabButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    callback clicked();
+
+    width: label.preferred-width + 28px;
+    height: 30px;
+    border-radius: 4px;
+    background: root.selected ? Theme.accent : (touch.has-hover ? Palette.alternate-background : transparent);
+
+    label := Text {
+        text: root.text;
+        color: root.selected ? white : Palette.foreground;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}

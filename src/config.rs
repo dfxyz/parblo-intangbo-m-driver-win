@@ -66,6 +66,17 @@ impl Key {
         }
     }
 
+    /// 按单个字符查配置里的键名；录制时界面给的普通键就是字符本身。
+    /// 多字符的键名（`esc`、`f1`、`ctrl`…）不会被这里匹配到
+    pub fn config_name(ch: char) -> Option<&'static str> {
+        let mut buf = [0u8; 4];
+        let text = ch.encode_utf8(&mut buf);
+        KEYBOARD_KEYS
+            .iter()
+            .find(|(name, _)| *name == text)
+            .map(|(name, _)| *name)
+    }
+
     fn parse(name: &str) -> Result<Self> {
         if let Some((_, code)) = KEYBOARD_KEYS.iter().find(|(key, _)| *key == name) {
             return Ok(Key::Keyboard(*code));
@@ -271,15 +282,6 @@ impl AreaAnchor {
         AreaAnchor::BottomRight,
     ];
 
-    pub fn label(&self) -> &'static str {
-        match self {
-            AreaAnchor::TopLeft => "对齐左上角",
-            AreaAnchor::TopRight => "对齐右上角",
-            AreaAnchor::BottomLeft => "对齐左下角",
-            AreaAnchor::BottomRight => "对齐右下角",
-        }
-    }
-
     pub fn is_right(&self) -> bool {
         matches!(self, AreaAnchor::TopRight | AreaAnchor::BottomRight)
     }
@@ -328,6 +330,15 @@ impl Default for TabletArea {
         }
     }
 }
+/// 归一化到设备量程的矩形
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NormRect {
+    pub x_min: f32,
+    pub x_max: f32,
+    pub y_min: f32,
+    pub y_max: f32,
+}
+
 impl TabletArea {
     pub fn width(&self) -> f32 {
         (self.x_max - self.x_min).max(f32::EPSILON)
@@ -335,6 +346,37 @@ impl TabletArea {
 
     pub fn height(&self) -> f32 {
         (self.y_max - self.y_min).max(f32::EPSILON)
+    }
+
+    /// 在映射区域内取一块符合屏幕比例的矩形，靠向`anchor`指定的角。
+    /// 这样笔迹不会变形，多出来的部分留在相对的另一侧。
+    /// 注入与界面上的示意图共用这一份计算，否则预览会与实际行为不符
+    pub fn effective(&self, tablet_aspect: f32, screen_aspect: f32) -> NormRect {
+        let (width, height) = (self.width(), self.height());
+        // 区域在设备物理尺度上的宽高比
+        let area_aspect = width / height * tablet_aspect;
+        let (used_width, used_height) = if area_aspect > screen_aspect {
+            (height * screen_aspect / tablet_aspect, height)
+        } else {
+            (width, width * tablet_aspect / screen_aspect)
+        };
+
+        let x_min = if self.anchor.is_right() {
+            self.x_min + width - used_width
+        } else {
+            self.x_min
+        };
+        let y_min = if self.anchor.is_bottom() {
+            self.y_min + height - used_height
+        } else {
+            self.y_min
+        };
+        NormRect {
+            x_min,
+            x_max: x_min + used_width,
+            y_min,
+            y_max: y_min + used_height,
+        }
     }
 
     fn sanitized(mut self) -> Self {
@@ -607,10 +649,7 @@ mod tests {
             keymaps: vec![first, second],
             ..Default::default()
         };
-        assert_eq!(
-            config.resolve(1, Control::Button0).to_config_value(),
-            "a"
-        );
+        assert_eq!(config.resolve(1, Control::Button0).to_config_value(), "a");
         assert_eq!(config.resolve(1, Control::Button1), Keymap::None);
     }
 }

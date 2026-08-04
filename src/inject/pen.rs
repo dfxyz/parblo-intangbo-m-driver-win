@@ -1,8 +1,5 @@
 use anyhow::{Context, Result};
 use windows::Win32::Foundation::POINT;
-use windows::Win32::UI::HiDpi::{
-    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
-};
 use windows::Win32::UI::Controls::{
     CreateSyntheticPointerDevice, DestroySyntheticPointerDevice, HSYNTHETICPOINTERDEVICE,
     POINTER_FEEDBACK_NONE, POINTER_TYPE_INFO, POINTER_TYPE_INFO_0,
@@ -18,7 +15,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::config::{PressureCurve, TabletArea};
-use crate::debug;
 use crate::device::hid::PenRanges;
 use crate::device::protocol::PenEvent;
 
@@ -44,15 +40,9 @@ struct ScreenRect {
 }
 
 impl PenInjector {
+    /// 注入坐标用的是物理像素，要求进程已声明Per-Monitor-V2的DPI感知，
+    /// 由`crate::declare_dpi_awareness`在启动最早期负责
     pub fn new(ranges: PenRanges) -> Result<Self> {
-        // 注入坐标用的是物理像素，因此进程必须声明DPI感知。
-        // 该设置每个进程只能生效一次，界面框架通常已经设好，此时这里会失败，忽略即可。
-        unsafe {
-            if let Err(e) = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
-            {
-                debug!("进程的DPI感知已由其他组件设置: {}", e);
-            }
-        }
         let device = unsafe { CreateSyntheticPointerDevice(PT_PEN, 1, POINTER_FEEDBACK_NONE) }
             .context("CreateSyntheticPointerDevice")?;
         Ok(Self {
@@ -173,48 +163,35 @@ impl PenInjector {
             .context("InjectSyntheticPointerInput")
     }
 
-    /// 在映射区域内取一块符合屏幕比例的矩形映射到全屏，靠向配置指定的那个角。
-    /// 这样笔迹不会变形，多出来的部分留在相对的另一侧
+    /// 把设备坐标映射到屏幕；参与映射的子区域由[`TabletArea::effective`]算出
     fn to_screen(&self, x: u16, y: u16) -> POINT {
-        let (used_width, used_height) = self.effective_area();
-        let area_left = self.area.x_min * self.ranges.x_max as f32;
-        let area_top = self.area.y_min * self.ranges.y_max as f32;
-        let area_width = self.area.width() * self.ranges.x_max as f32;
-        let area_height = self.area.height() * self.ranges.y_max as f32;
+        let used = self.area.effective(
+            tablet_aspect(self.ranges),
+            self.screen.width.max(1) as f32 / self.screen.height.max(1) as f32,
+        );
+        let left = used.x_min * self.ranges.x_max as f32;
+        let top = used.y_min * self.ranges.y_max as f32;
+        let width = ((used.x_max - used.x_min) * self.ranges.x_max as f32).max(f32::EPSILON);
+        let height = ((used.y_max - used.y_min) * self.ranges.y_max as f32).max(f32::EPSILON);
 
-        let left = if self.area.anchor.is_right() {
-            area_left + area_width - used_width
-        } else {
-            area_left
-        };
-        let top = if self.area.anchor.is_bottom() {
-            area_top + area_height - used_height
-        } else {
-            area_top
-        };
-
-        let ratio_x = ((x as f32 - left) / used_width).clamp(0.0, 1.0);
-        let ratio_y = ((y as f32 - top) / used_height).clamp(0.0, 1.0);
+        let ratio_x = ((x as f32 - left) / width).clamp(0.0, 1.0);
+        let ratio_y = ((y as f32 - top) / height).clamp(0.0, 1.0);
         POINT {
             x: self.screen.x + (ratio_x * (self.screen.width - 1) as f32).round() as i32,
             y: self.screen.y + (ratio_y * (self.screen.height - 1) as f32).round() as i32,
         }
     }
+}
 
-    /// 映射区域内真正参与映射的尺寸，单位是设备坐标
-    fn effective_area(&self) -> (f32, f32) {
-        let width = self.area.width() * self.ranges.x_max as f32;
-        let height = self.area.height() * self.ranges.y_max as f32;
-        if width <= f32::EPSILON || height <= f32::EPSILON {
-            return (1.0, 1.0);
-        }
-        let screen_aspect = self.screen.width.max(1) as f32 / self.screen.height.max(1) as f32;
-        if width / height > screen_aspect {
-            (height * screen_aspect, height)
-        } else {
-            (width, width / screen_aspect)
-        }
-    }
+/// 量程的宽高比；两个轴的分辨率相同，因此它也是绘图板的物理宽高比
+pub fn tablet_aspect(ranges: PenRanges) -> f32 {
+    ranges.x_max.max(1) as f32 / ranges.y_max.max(1) as f32
+}
+
+/// 虚拟屏幕的宽高比
+pub fn screen_aspect() -> f32 {
+    let screen = read_screen_rect();
+    screen.width.max(1) as f32 / screen.height.max(1) as f32
 }
 
 impl Drop for PenInjector {

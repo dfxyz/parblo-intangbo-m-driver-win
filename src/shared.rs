@@ -1,9 +1,13 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::collections::VecDeque;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use crate::config::Config;
 use crate::device::hid::PenRanges;
 use crate::device::protocol::{Button, PenEvent};
+
+/// 监视面板上「最近的按键事件」保留几条
+const MAX_RECENT_BUTTONS: usize = 5;
 
 #[derive(Clone, Default)]
 pub struct Status {
@@ -11,26 +15,54 @@ pub struct Status {
     pub ranges: Option<PenRanges>,
 }
 
-/// 监视面板用的原始数据；仅在面板打开时才由驱动写入
+/// 笔在本次测量中实际到达过的坐标范围。
+/// 设备声明的量程通常大于真实可感应范围，靠这个来修正
+#[derive(Clone, Copy)]
+pub struct Observed {
+    pub min_x: u16,
+    pub max_x: u16,
+    pub min_y: u16,
+    pub max_y: u16,
+}
+impl Default for Observed {
+    fn default() -> Self {
+        Self {
+            min_x: u16::MAX,
+            max_x: 0,
+            min_y: u16::MAX,
+            max_y: 0,
+        }
+    }
+}
+impl Observed {
+    pub fn is_empty(&self) -> bool {
+        self.min_x > self.max_x
+    }
+
+    fn record(&mut self, x: u16, y: u16) {
+        self.min_x = self.min_x.min(x);
+        self.max_x = self.max_x.max(x);
+        self.min_y = self.min_y.min(y);
+        self.max_y = self.max_y.max(y);
+    }
+}
+
+/// 界面用的实时数据
 #[derive(Clone, Default)]
 pub struct Monitor {
     pub pen: Option<PenEvent>,
-    pub button: Option<Button>,
-    pub pen_count: u64,
-    pub button_count: u64,
+    pub recent_buttons: VecDeque<Button>,
+    pub observed: Observed,
 }
 
-/// 界面线程与驱动线程之间的共享状态
+/// 驱动线程与界面线程之间的共享状态
 pub struct Shared {
     config: Mutex<Config>,
     config_version: AtomicU64,
     status: Mutex<Status>,
-    /// 当前生效的按键映射方案；界面与驱动共用同一份，两边都能改
+    /// 当前生效的按键映射方案；界面与驱动共用同一个下标，两边都能改
     keymap_index: AtomicUsize,
-    show_requested: AtomicBool,
-    monitor_enabled: AtomicBool,
     monitor: Mutex<Monitor>,
-    on_change: OnceLock<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl Shared {
@@ -41,36 +73,39 @@ impl Shared {
             config_version: AtomicU64::new(1),
             status: Mutex::new(Status::default()),
             keymap_index: AtomicUsize::new(keymap_index),
-            show_requested: AtomicBool::new(false),
-            monitor_enabled: AtomicBool::new(false),
             monitor: Mutex::new(Monitor::default()),
-            on_change: OnceLock::new(),
         }
-    }
-
-    pub fn set_monitor_enabled(&self, enabled: bool) {
-        self.monitor_enabled.store(enabled, Ordering::Release);
-    }
-
-    pub fn monitor_enabled(&self) -> bool {
-        self.monitor_enabled.load(Ordering::Acquire)
     }
 
     pub fn monitor(&self) -> Monitor {
         self.monitor.lock().unwrap().clone()
     }
 
-    /// 事件率高达两百多赫兹，这里只更新数据、不触发重绘，由界面自行按帧率刷新
+    /// 每个笔事件都会调到这里，包括测量坐标极值；
+    /// 事件率两百多赫兹，但无争用的互斥量开销可以忽略
     pub fn record_pen(&self, event: PenEvent) {
         let mut monitor = self.monitor.lock().unwrap();
+        if event.in_area {
+            monitor.observed.record(event.x, event.y);
+        }
         monitor.pen = Some(event);
-        monitor.pen_count += 1;
     }
 
+    /// 松开事件不进列表，那不是「按了哪个键」
     pub fn record_button(&self, button: Button) {
+        if button == Button::Release {
+            return;
+        }
         let mut monitor = self.monitor.lock().unwrap();
-        monitor.button = Some(button);
-        monitor.button_count += 1;
+        while monitor.recent_buttons.len() >= MAX_RECENT_BUTTONS {
+            monitor.recent_buttons.pop_front();
+        }
+        monitor.recent_buttons.push_back(button);
+    }
+
+    /// 重新开始测量坐标极值
+    pub fn clear_observed(&self) {
+        self.monitor.lock().unwrap().observed = Observed::default();
     }
 
     pub fn keymap_index(&self) -> usize {
@@ -79,29 +114,6 @@ impl Shared {
 
     pub fn set_keymap_index(&self, index: usize) {
         self.keymap_index.store(index, Ordering::Release);
-        if let Some(on_change) = self.on_change.get() {
-            on_change();
-        }
-    }
-
-    /// 由另一个实例触发，请求界面线程显示窗口
-    pub fn request_show(&self) {
-        self.show_requested.store(true, Ordering::Release);
-        if let Some(on_change) = self.on_change.get() {
-            on_change();
-        }
-    }
-
-    pub fn take_show_request(&self) -> bool {
-        self.show_requested.swap(false, Ordering::AcqRel)
-    }
-
-    /// 注册状态变化的通知回调；由界面线程设置为请求重绘
-    pub fn set_on_change<F>(&self, f: F)
-    where
-        F: Fn() + Send + Sync + 'static,
-    {
-        let _ = self.on_change.set(Box::new(f));
     }
 
     pub fn config_version(&self) -> u64 {
@@ -126,8 +138,5 @@ impl Shared {
         F: FnOnce(&mut Status),
     {
         f(&mut self.status.lock().unwrap());
-        if let Some(on_change) = self.on_change.get() {
-            on_change();
-        }
     }
 }

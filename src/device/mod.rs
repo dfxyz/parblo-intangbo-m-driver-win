@@ -35,6 +35,8 @@ pub struct Driver {
     session: Option<Session>,
     /// 重连每秒重试一次，这里记住上次的失败原因，只在变化时写日志
     last_connect_error: Option<String>,
+    /// 笔事件有两百多赫兹，调试日志按这个计数抽样，否则瞬间冲掉整个日志环
+    pen_events: u64,
 }
 
 /// 字段顺序决定析构顺序：读取器持有设备句柄，必须先于设备析构
@@ -61,6 +63,7 @@ impl Driver {
             stylus_pressed: [false; 2],
             session: None,
             last_connect_error: None,
+            pen_events: 0,
         })
     }
 
@@ -120,7 +123,7 @@ impl Driver {
         if self.shared.keymap_index() >= self.config.keymaps.len() {
             self.shared.set_keymap_index(0);
         }
-        info!(
+        debug!(
             "已重新加载配置；当前使用按键映射方案{}",
             self.shared.keymap_index()
         );
@@ -195,13 +198,11 @@ impl Driver {
 
     fn handle_button(&mut self, button: Button) -> Result<()> {
         debug!("收到按键事件: {:?}", button);
-        if self.shared.monitor_enabled() {
-            self.shared.record_button(button);
-        }
+        self.shared.record_button(button);
         let Some(control) = control_of(button) else {
             return self.button_keys.release();
         };
-        match self.config.resolve(self.shared.keymap_index(),control) {
+        match self.config.resolve(self.shared.keymap_index(), control) {
             Keymap::None | Keymap::Fallback => Ok(()),
             Keymap::Press(keys) => self.button_keys.press(&keys),
             Keymap::SwitchSchema => {
@@ -212,12 +213,16 @@ impl Driver {
     }
 
     fn handle_pen(&mut self, pen: PenEvent) -> Result<()> {
-        if self.shared.monitor_enabled() {
-            self.shared.record_pen(pen);
+        if self.pen_events % 60 == 0 {
+            debug!("笔事件: {:?}", pen);
         }
+        self.pen_events += 1;
+        self.shared.record_pen(pen);
         let keymaps = [
-            self.config.resolve(self.shared.keymap_index(),Control::StylusButton0),
-            self.config.resolve(self.shared.keymap_index(),Control::StylusButton1),
+            self.config
+                .resolve(self.shared.keymap_index(), Control::StylusButton0),
+            self.config
+                .resolve(self.shared.keymap_index(), Control::StylusButton1),
         ];
         let pressed = [pen.button0_pressed, pen.button1_pressed];
         for index in 0..2 {

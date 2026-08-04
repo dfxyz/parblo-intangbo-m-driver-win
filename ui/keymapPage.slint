@@ -1,0 +1,248 @@
+import { Button, LineEdit, ScrollView } from "std-widgets.slint";
+import { KeymapLogic, Theme } from "common.slint";
+import { TabButton } from "widgets.slint";
+
+export component KeymapPage inherits FocusScope {
+    // 正在录制的行下标，-1表示没有在录制
+    private property <int> recording: -1;
+
+    function stop-record() {
+        if (root.recording >= 0) {
+            root.recording = -1;
+            KeymapLogic.cancel-record();
+        }
+    }
+
+    function apply(index: int, value: string) {
+        root.stop-record();
+        // 输入框里的文本由界面自己维护，Rust侧只做记录，不回写
+        KeymapLogic.entries[index].value = value;
+        KeymapLogic.set-entry(index, value);
+    }
+
+    // 录制期间独占键盘；没在录制时一律放行，免得挡住输入框和快捷键
+    key-pressed(event) => {
+        if (root.recording < 0) {
+            return reject;
+        }
+        if (KeymapLogic.record-key(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt, event.modifiers.meta)) {
+            root.recording = -1;
+        }
+        return accept;
+    }
+
+    VerticalLayout {
+        spacing: 8px;
+
+        // 方案个数可能超出一行，预留横向滚动
+        ScrollView {
+            height: 36px;
+            vertical-scrollbar-policy: always-off;
+
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+
+                for index in KeymapLogic.schema-count: TabButton {
+                    text: "方案 \{index}";
+                    selected: index == KeymapLogic.schema-index;
+                    clicked => {
+                        root.stop-record();
+                        KeymapLogic.select-schema(index);
+                    }
+                }
+            }
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                alignment: start;
+
+                GridLayout {
+                    spacing: 6px;
+
+                    for entry[index] in KeymapLogic.entries: Row {
+                        Text {
+                            text: entry.label;
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                            width: 84px;
+                        }
+
+                        field := Rectangle {
+                            // 镜像一份model里的值，好在它变化时把输入框拽回来
+                            property <string> value: entry.value;
+
+                            horizontal-stretch: 1;
+                            min-width: 200px;
+                            min-height: input.preferred-height + 4px;
+                            // 无效值时套一圈红框。边框宽度恒为2px，只切换颜色，
+                            // 否则有无边框时输入框会跳动；录制时输入框藏着，不必标红
+                            border-width: 2px;
+                            border-radius: 6px;
+                            border-color: root.recording == index || KeymapLogic.validate(field.value)
+                                ? transparent
+                                : Theme.error;
+
+                            // 用户敲过字之后，LineEdit的text绑定就被赋值打破了，
+                            // 外面再改model也带不动它，所以这里显式同步；
+                            // 值相同时不写，免得光标被重置
+                            changed value => {
+                                if (input.text != field.value) {
+                                    input.text = field.value;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                padding: 2px;
+
+                                input := LineEdit {
+                                    visible: root.recording != index;
+                                    text: field.value;
+                                    edited(value) => {
+                                        KeymapLogic.entries[index].value = value;
+                                        KeymapLogic.set-entry(index, value);
+                                    }
+                                }
+                            }
+
+                            Text {
+                                // 与输入框里的文字起点对齐，切换时不跳动
+                                x: 14px;
+                                visible: root.recording == index;
+                                text: "请按下快捷键…";
+                                color: Theme.ok;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        menu := ContextMenuArea {
+                            Menu {
+                                MenuItem {
+                                    title: "切换方案";
+                                    activated => {
+                                        root.apply(index, "switchSchema");
+                                    }
+                                }
+
+                                MenuItem {
+                                    title: "沿用前一个方案";
+                                    activated => {
+                                        root.apply(index, "fallback");
+                                    }
+                                }
+
+                                MenuSeparator { }
+
+                                MenuItem {
+                                    title: "鼠标左键";
+                                    activated => {
+                                        root.apply(index, "mouseLeft");
+                                    }
+                                }
+
+                                MenuItem {
+                                    title: "鼠标中键";
+                                    activated => {
+                                        root.apply(index, "mouseMiddle");
+                                    }
+                                }
+
+                                MenuItem {
+                                    title: "鼠标右键";
+                                    activated => {
+                                        root.apply(index, "mouseRight");
+                                    }
+                                }
+
+                                MenuSeparator { }
+
+                                MenuItem {
+                                    title: "禁用";
+                                    activated => {
+                                        root.apply(index, "none");
+                                    }
+                                }
+                            }
+
+                            // Windows上的菜单由muda以TrackPopupMenu弹出，是模态的，
+                            // 期间主窗口不重绘；隔一拍再弹，取消录制才来得及画出来
+                            opener := Timer {
+                                interval: 1ms;
+                                running: false;
+                                triggered => {
+                                    self.running = false;
+                                    menu.show({ x: 0, y: special.height + 2px });
+                                }
+                            }
+
+                            special := Button {
+                                text: "插入特殊值 ▼";
+                                clicked => {
+                                    // 打开菜单等同于放弃这次录制
+                                    root.stop-record();
+                                    opener.running = true;
+                                }
+                            }
+                        }
+
+                        Button {
+                            text: root.recording == index ? "取消" : "录制..";
+                            clicked => {
+                                if (root.recording == index) {
+                                    root.stop-record();
+                                } else {
+                                    root.recording = index;
+                                    KeymapLogic.start-record(index);
+                                    // 键盘事件只会送到有焦点的那一层
+                                    root.focus();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Button {
+                text: "新增方案";
+                clicked => {
+                    root.stop-record();
+                    KeymapLogic.add-schema();
+                }
+            }
+
+            Button {
+                text: "删除当前方案";
+                enabled: KeymapLogic.schema-count > 1;
+                clicked => {
+                    root.stop-record();
+                    KeymapLogic.remove-schema();
+                }
+            }
+
+            Rectangle { }
+
+            Button {
+                text: "保存";
+                clicked => {
+                    KeymapLogic.save();
+                }
+            }
+
+            Button {
+                text: "重新加载配置文件";
+                clicked => {
+                    root.stop-record();
+                    KeymapLogic.reload();
+                }
+            }
+        }
+    }
+}

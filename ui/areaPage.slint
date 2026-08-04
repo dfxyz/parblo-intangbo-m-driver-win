@@ -1,0 +1,212 @@
+import { Button, Palette } from "std-widgets.slint";
+import { AreaLogic, Theme } from "common.slint";
+import { ToggleButton } from "widgets.slint";
+
+/// 按绘图板比例在可用空间内最大化并居中的示意图
+component AreaPreview inherits Rectangle {
+    private property <length> box-width: min(root.width, root.height * AreaLogic.tablet-aspect);
+
+    canvas := Rectangle {
+        width: root.box-width;
+        height: root.box-width / AreaLogic.tablet-aspect;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        background: Theme.canvas-bg;
+        border-radius: 4px;
+        clip: true;
+
+        Rectangle {
+            x: AreaLogic.area.x1 * parent.width;
+            y: AreaLogic.area.y1 * parent.height;
+            width: (AreaLogic.area.x2 - AreaLogic.area.x1) * parent.width;
+            height: (AreaLogic.area.y2 - AreaLogic.area.y1) * parent.height;
+            background: Theme.area-fill;
+        }
+
+        Rectangle {
+            x: AreaLogic.area-used.x1 * parent.width;
+            y: AreaLogic.area-used.y1 * parent.height;
+            width: (AreaLogic.area-used.x2 - AreaLogic.area-used.x1) * parent.width;
+            height: (AreaLogic.area-used.y2 - AreaLogic.area-used.y1) * parent.height;
+            background: Theme.area-used-fill;
+        }
+
+        Rectangle {
+            visible: AreaLogic.has-measured;
+            x: AreaLogic.area-measured.x1 * parent.width;
+            y: AreaLogic.area-measured.y1 * parent.height;
+            width: (AreaLogic.area-measured.x2 - AreaLogic.area-measured.x1) * parent.width;
+            height: (AreaLogic.area-measured.y2 - AreaLogic.area-measured.y1) * parent.height;
+            background: transparent;
+            border-width: 3px;
+            border-color: Theme.measured-stroke;
+        }
+
+        Rectangle {
+            visible: AreaLogic.pen-in-area;
+            x: AreaLogic.pen-x * parent.width - self.width / 2;
+            y: AreaLogic.pen-y * parent.height - self.height / 2;
+            width: 6px;
+            height: 6px;
+            border-radius: self.width / 2;
+            background: white;
+        }
+    }
+}
+
+export component AreaPage inherits VerticalLayout {
+    spacing: 10px;
+
+    Text {
+        text: "设备声明的坐标范围通常大于真实可感应范围。把笔贴着板子边缘划一圈测出真实范围后，再按显示器比例取一块矩形映射到全屏，笔迹就不会变形。";
+        color: grey;
+        wrap: word-wrap;
+    }
+
+    GridLayout {
+        spacing: 6px;
+
+        Row {
+            Text {
+                text: "设备声明的坐标范围：";
+                horizontal-alignment: right;
+            }
+
+            Text {
+                text: AreaLogic.declared-x;
+            }
+
+            Text {
+                text: AreaLogic.declared-y;
+                horizontal-stretch: 1;
+            }
+        }
+
+        Row {
+            Text {
+                text: "当前设置的坐标范围：";
+                horizontal-alignment: right;
+            }
+
+            Text {
+                text: AreaLogic.configured-x;
+            }
+
+            Text {
+                text: AreaLogic.configured-y;
+                horizontal-stretch: 1;
+            }
+        }
+
+        Row {
+            Text {
+                text: "实测有效的坐标范围：";
+                horizontal-alignment: right;
+            }
+
+            Text {
+                text: AreaLogic.measured-x;
+            }
+
+            Text {
+                text: AreaLogic.measured-y;
+                horizontal-stretch: 1;
+            }
+        }
+
+        Row {
+            Text {
+                text: "当前坐标：";
+                horizontal-alignment: right;
+            }
+
+            // 笔不在感应区时没有坐标可显示，提示占住第二列
+            Text {
+                text: AreaLogic.pen-in-area ? AreaLogic.current-x : "笔不在感应区内";
+                color: AreaLogic.pen-in-area ? Palette.foreground : grey;
+            }
+
+            Text {
+                text: AreaLogic.pen-in-area ? AreaLogic.current-y : "";
+                horizontal-stretch: 1;
+            }
+        }
+    }
+
+    // 这一排与下一排都是点了立即生效，但要按「保存」才写回配置文件
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+
+        Button {
+            text: "使用实测值更新坐标范围";
+            enabled: AreaLogic.has-measured;
+            clicked => {
+                AreaLogic.apply-measured();
+            }
+        }
+
+        Button {
+            text: "重新测量";
+            clicked => {
+                AreaLogic.remeasure();
+            }
+        }
+
+        Button {
+            text: "重置为全范围";
+            clicked => {
+                AreaLogic.reset-range();
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+
+        Text {
+            text: "对齐方式：";
+            vertical-alignment: center;
+        }
+
+        for label[index] in ["左上角", "右上角", "左下角", "右下角"]: ToggleButton {
+            text: label;
+            selected: AreaLogic.anchor == index;
+            clicked => {
+                AreaLogic.anchor = index;
+                AreaLogic.select-anchor(index);
+            }
+        }
+    }
+
+    AreaPreview {
+        vertical-stretch: 1;
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+
+        Text {
+            text: "深紫=生效区域  亮紫=按屏幕比例修正后的生效区域  绿框=实测的生效区域";
+            color: grey;
+            vertical-alignment: center;
+        }
+
+        Rectangle { }
+
+        Button {
+            text: "保存";
+            clicked => {
+                AreaLogic.save();
+            }
+        }
+
+        Button {
+            text: "重新加载配置文件";
+            clicked => {
+                AreaLogic.reload();
+            }
+        }
+    }
+}

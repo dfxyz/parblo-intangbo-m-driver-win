@@ -1,0 +1,38 @@
+/// 常驻系统托盘的图标与菜单。这是个顶层组件，不能放进Window里，
+/// 由Rust侧单独实例化；实例活着图标就在，drop掉就消失
+export component TrayIcon inherits SystemTrayIcon {
+    tooltip: "Parblo Intangbo M 驱动程序";
+    // 内置的icon属性没有生成setter，转发一层给Rust侧写。
+    // 图标为空时托盘项根本不会注册
+    in property <image> tray-icon;
+    icon: root.tray-icon;
+
+    // 主界面当前是否显示；菜单文字与点击行为都跟着它走
+    in property <bool> window-visible;
+
+    callback toggle-window();
+    callback quit();
+
+    // Windows上左键点图标触发这个回调，右键才展开菜单
+    clicked => {
+        root.toggle-window();
+    }
+
+    Menu {
+        MenuItem {
+            title: root.window-visible ? "隐藏窗口" : "显示窗口";
+            activated => {
+                root.toggle-window();
+            }
+        }
+
+        MenuSeparator { }
+
+        MenuItem {
+            title: "退出";
+            activated => {
+                root.quit();
+            }
+        }
+    }
+}

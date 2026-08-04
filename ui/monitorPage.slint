@@ -1,0 +1,133 @@
+import { Button, ScrollView, Palette } from "std-widgets.slint";
+import { MonitorLogic, Theme } from "common.slint";
+
+export component MonitorPage inherits VerticalLayout {
+    spacing: 10px;
+
+    VerticalLayout {
+        spacing: 8px;
+
+        Text {
+            text: "原始数据";
+            font-weight: 700;
+        }
+
+        GridLayout {
+            spacing: 6px;
+
+            Row {
+                Text {
+                    text: "笔状态：";
+                    horizontal-alignment: right;
+                }
+
+                Text {
+                    text: MonitorLogic.pen-state;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            Row {
+                Text {
+                    text: "笔坐标：";
+                    horizontal-alignment: right;
+                }
+
+                Text {
+                    text: MonitorLogic.pen-coord;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            Row {
+                Text {
+                    text: "笔压力：";
+                    horizontal-alignment: right;
+                }
+
+                Text {
+                    text: MonitorLogic.pen-pressure;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            Row {
+                Text {
+                    text: "笔倾斜：";
+                    horizontal-alignment: right;
+                }
+
+                Text {
+                    text: MonitorLogic.pen-tilt;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            Row {
+                Text {
+                    text: "最近5次按键事件：";
+                    horizontal-alignment: right;
+                }
+
+                Text {
+                    text: MonitorLogic.recent-buttons;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+    }
+
+    VerticalLayout {
+        vertical-stretch: 1;
+        spacing: 8px;
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Text {
+                text: "日志";
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: "设置环境变量 PARBLO_DEBUG 可输出更详细的日志";
+                color: grey;
+                vertical-alignment: center;
+            }
+
+            Rectangle { }
+
+            Button {
+                text: "清空";
+                clicked => {
+                    MonitorLogic.clear-logs();
+                }
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            background: Palette.alternate-background;
+            border-radius: 4px;
+            clip: true;
+
+            ScrollView {
+                VerticalLayout {
+                    padding: 6px;
+                    alignment: start;
+
+                    for entry in MonitorLogic.logs: Text {
+                        text: "[" + entry.level + "] " + entry.text;
+                        font-family: "Fira Noto SC";
+                        color: entry.level == "ERROR" ? Theme.error
+                            : entry.level == "WARN" ? Theme.warn
+                            : entry.level == "DEBUG" ? grey
+                            : Palette.foreground;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}
